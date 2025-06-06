@@ -1,40 +1,32 @@
-import torch
+import sys
+
+sys.path.append("..")  
+
 import torch.nn as nn
+from models.components import ResnetBlock, Downsample, PreNorm, LinearAttention, Residual
+
 
 class VQVAEEncoder(nn.Module):
-    def __init__(self, embedding_dim=64):
+    def __init__(self, in_out, attn=True):
         super().__init__()
-        self.block1 = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=(3, 7), stride=(1, 2), padding=(1, 3)),
-            nn.BatchNorm2d(32),
-            nn.ReLU(),
-        )
-        self.block2 = nn.Sequential(
-            nn.Conv2d(32, 64, kernel_size=(3, 7), stride=(1, 2), padding=(1, 3)),
-            nn.BatchNorm2d(64),
-            nn.ReLU(),
-        )
-        self.block3 = nn.Sequential(
-            nn.Conv2d(64, 64, kernel_size=(3, 6), stride=(1, 2), padding=(1, 2)),
-            nn.BatchNorm2d(64),
-            nn.ReLU(),
-        )
-        
-        self.block4 = nn.Sequential(
-            nn.Conv2d(64, 128, kernel_size=(3, 6), stride=(1, 2), padding=(1, 2)),
-            nn.BatchNorm2d(128),
-            nn.ReLU(),
-        )
-        self.block5 = nn.Sequential(
-            nn.Conv2d(128, embedding_dim, kernel_size=(3, 6), stride=(1, 2), padding=(1, 2)),
-            nn.BatchNorm2d(embedding_dim),
-            nn.ReLU(),
-        )
+        self.downs = nn.ModuleList([])
+        for ind, (dim_in, dim_out) in enumerate(in_out):
+            self.downs.append(nn.ModuleList([
+            ResnetBlock(dim_in, dim_in),
+            ResnetBlock(dim_in, dim_in),
+            Residual(PreNorm(dim_in, LinearAttention(dim_in))) if attn else nn.Identity(),
+            Downsample(dim_in, dim_out)
+        ]))
+        self.attn = attn
+
 
     def forward(self, x):
-        x = self.block1(x)
-        x = self.block2(x)
-        x = self.block3(x)
-        x = self.block4(x)
-        x = self.block5(x)
+        for block1, block2, attn, downsample in self.downs:
+            x = block1(x)
+            x = block2(x)
+
+            x = attn(x)
+
+            x = downsample(x)
+       
         return x

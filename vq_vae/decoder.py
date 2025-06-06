@@ -1,46 +1,32 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from models.components import ResnetBlock, Upsample, PreNorm, LinearAttention, Residual
 
 class VQVAEDecoder(nn.Module):
-    def __init__(self, embedding_dim=64):
+    def __init__(self, in_out, attn=True):
         super().__init__()
-        self.block1 = nn.Sequential(
-            nn.ConvTranspose2d(embedding_dim, 128, kernel_size=(3, 6), stride=(1, 2), padding=(1, 2)),
-            nn.BatchNorm2d(128),
-            nn.ReLU(),
-        )
-        self.block2 = nn.Sequential(
-            nn.ConvTranspose2d(128, 64, kernel_size=(3, 6), stride=(1, 2), padding=(1, 2)),
-            nn.BatchNorm2d(64),
-            nn.ReLU(),
-        )
-        self.block3 = nn.Sequential(
-            nn.ConvTranspose2d(64, 64, kernel_size=(3, 6), stride=(1, 2), padding=(1, 2)),
-            nn.BatchNorm2d(64),
-            nn.ReLU(),
-        )
-        self.block4 = nn.Sequential(
-            nn.ConvTranspose2d(64, 32, kernel_size=(3, 7), stride=(1, 2), padding=(1, 3)),
-            nn.BatchNorm2d(32),
-            nn.ReLU(),
-        )
-        self.block5 = nn.Sequential(
-            nn.ConvTranspose2d(32, 1, kernel_size=(3, 7), stride=(1, 2), padding=(1, 3)),
-        )
+
+        self.attn = attn
+        self.ups = nn.ModuleList([])
+        for ind, (dim_in, dim_out) in enumerate(reversed(in_out)):
+            self.ups.append(nn.ModuleList([
+                ResnetBlock(dim_out , dim_out),
+                ResnetBlock(dim_out , dim_out),
+                Residual(PreNorm(dim_out, LinearAttention(dim_out))) if attn else nn.Identity(),
+                Upsample(dim_out, dim_in)
+            ]))
 
     def forward(self, z_q):
-        x = self.block1(z_q)
-        x = self.block2(x)
-        x = self.block3(x)
-        if x.shape[-1] % 2 != 1:
-            x = F.pad(x, (0, 1, 0, 0))
-        x = self.block4(x)
-        if x.shape[-1] % 2 != 0:
-            x = F.pad(x, (0, 1, 0, 0))
-        x = self.block5(x)
-        if x.shape[-1] % 2 != 0:
-            x = F.pad(x, (0, 1, 0, 0))
-        return x
+        for block1, block2, attn, upsample in self.ups:
+            if z_q.shape[-1] == 624:
+                z_q = F.pad(z_q, (0, 1, 0, 0))
+            
+            z_q = block1(z_q)
+            z_q = block2(z_q)
+
+            z_q = attn(z_q)
+
+            z_q = upsample(z_q)
+        return z_q
 

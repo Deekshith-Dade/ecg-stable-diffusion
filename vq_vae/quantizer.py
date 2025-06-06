@@ -1,9 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
+import os
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class VectorQuantizer(nn.Module):
     def __init__(self, num_embeddings, embedding_dim, beta):
@@ -14,6 +13,13 @@ class VectorQuantizer(nn.Module):
         
         self.embedding = nn.Embedding(self.num_embeddings, self.embedding_dim)
         self.embedding.weight.data.uniform_(-1.0 / self.num_embeddings, 1.0 / self.num_embeddings)
+        if torch.cuda.is_available():
+            if "LOCAL_RANK" in os.environ:
+                self.device = int(os.environ["LOCAL_RANK"])
+            else:
+                self.device = torch.cuda.current_device()
+        else:
+            self.device = torch.device("cpu")
         
     def forward(self, z):
         z = z.permute(0, 2, 3, 1).contiguous()
@@ -24,7 +30,7 @@ class VectorQuantizer(nn.Module):
                 torch.matmul(z_flattened, self.embedding.weight.t())
                 
         min_encoding_indices = torch.argmin(d, dim=1).unsqueeze(1)
-        min_encodings = torch.zeros(min_encoding_indices.shape[0], self.num_embeddings).to(device)
+        min_encodings = torch.zeros(min_encoding_indices.shape[0], self.num_embeddings).to(self.device)
         min_encodings.scatter_(1, min_encoding_indices, 1)
         
         z_q = torch.matmul(min_encodings, self.embedding.weight).view(z.shape)
