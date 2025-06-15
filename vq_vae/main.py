@@ -4,6 +4,7 @@ import datetime
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import yaml
 import torch
 import numpy as np
 import torch.nn as nn
@@ -30,8 +31,9 @@ timestamp = ""
 
 parser.add_argument("--batch_size", type=int, default=48)
 parser.add_argument("--n_epochs", type=int, default=250)
-parser.add_argument("--learning_rate", type=float, default=3e-4)
+parser.add_argument("--learning_rate", type=float, default=5e-6)
 parser.add_argument("--log_interval", type=int, default=1)
+parser.add_argument("--scale_training_size", type=float, default=1.0)
 parser.add_argument("--save_every", type=int, default=10, help="Save model every n epochs")
 parser.add_argument("--logtowandb", action='store_true', default=False, help="Log to wandb")
 
@@ -39,8 +41,7 @@ args = parser.parse_args()
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
-train_dataset, val_dataset = dataset.get_datasets(scale_training_size=0.1)
-
+train_dataset, val_dataset = dataset.get_datasets(args.scale_training_size)
 
 def ddp_setup():
     init_process_group(backend='nccl')
@@ -93,7 +94,6 @@ def train(model, optimizer, dataloader, means, stds, results_folder):
     'embedding_loss': [],
     }
     
-    
     epochs_run = 0
     if os.path.exists(f"{results_folder}/checkpoint.pt"):
         checkpoint = torch.load(f"{results_folder}/checkpoint.pt", map_location=device)
@@ -112,6 +112,10 @@ def train(model, optimizer, dataloader, means, stds, results_folder):
     
     for epoch in range(epochs_run, args.n_epochs):
         print(f"Training step {epoch+1}/{args.n_epochs}", end='\r')
+        
+        if isinstance(dataloader.sampler, DistributedSampler):
+            dataloader.sampler.set_epoch(epoch)
+        
         for batch_idx, batch in enumerate(tqdm(dataloader, desc=f"Epoch {epoch+1}")):
             # Use the correct device (GPU ID for DDP, or global device for single GPU)
             target_device = gpu_id if use_ddp else device
@@ -180,23 +184,31 @@ def main():
         ddp_setup()
     
     gpu_id = int(os.environ.get("LOCAL_RANK", 0))
-    print(f"Calculating mean and stds for the dataset")
-    # means, stds = calculate_mean_std(train_dataset)
-    # means = means.reshape(1, 1, -1, 1)
-    # stds = stds.reshape(1, 1, -1, 1)
+    
+    
     current_time = datetime.datetime.now()
     formatted_time = current_time.strftime("%Y-%m-%d_%H-%M-%S")
     
+    print(f"Calculating mean and stds for the dataset")
     stats = torch.load('/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/data/ecg_train_stats.pt', weights_only=True)
-    means = stats['mean'].to(device)
-    stds = stats['std'].to(device)
+    means = stats['mean'].to(gpu_id)
+    stds = stats['std'].to(gpu_id)
     print(f"Means: {means}, Stds: {stds}")
     # torch.save({'mean': means, 'std': stds}, '/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/data/ecg_train_stats.pt')
 
+    path = "/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/configs/diff.yaml"
+    with open(path, 'r') as f:
+        try:
+            model_config = yaml.safe_load(f)
+        except yaml.YAMLError as exc:
+            print(exc)
+    print(model_config)
+    
     config = dict(
         means = means,
         stds = stds,
-        args = args
+        args = args,
+        autoencoder_config = model_config['autoencoder_config']
     )
     
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, 
@@ -204,9 +216,9 @@ def main():
                                   drop_last=True,
                                   sampler=DistributedSampler(train_dataset, drop_last=True, shuffle=True) if "LOCAL_RANK" in os.environ else None)
     
-    model = VQVAE()
+    model = VQVAE(model_config=model_config['autoencoder_config'])
 
-    optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, amsgrad=True)
+    optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=1e-4)
 
     model.train()
 
@@ -218,12 +230,12 @@ def main():
     if gpu_id == 0 and args.logtowandb:
         wandbrun = wandb.init(
             project="ecg_vqvae",
-            notes = f"A simple trial of vqvae with small encoder",
+            notes = f"A UNET and 1M dataset",
             tags = ["vqvae", "bigdataset"],
             entity="deekshith",
             reinit=True,
             config=config,
-            name=f"{"vqvae"}_{datetime.datetime.now()}"
+            name=f"{"vqvae"}_{formatted_time}"
         )
         
     train(model, optimizer, train_dataloader, means, stds, results_folder)

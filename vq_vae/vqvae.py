@@ -6,19 +6,19 @@ from vq_vae.encoder import VQVAEEncoder
 from vq_vae.decoder import VQVAEDecoder
 from vq_vae.quantizer import VectorQuantizer
 
-model_config = {
-    "dim_mults": (1, 2, 4),
-    "in_channels": 1,
-    "init_dim": 128,
-    "embedding_dim": 8,
-    "codebook_size": 1024,
-    "beta": 0.25,
-    "attention": False,
-    "norm_channels": 32,
-}
+# model_config = {
+#     "dim_mults": (1, 2, 4),
+#     "in_channels": 1,
+#     "init_dim": 128,
+#     "embedding_dim": 8,
+#     "codebook_size": 1024,
+#     "beta": 0.25,
+#     "attention": False,
+#     "norm_channels": 32,
+# }
 
 class VQVAE(nn.Module):
-    def __init__(self, model_config=model_config):
+    def __init__(self, model_config):
         super(VQVAE, self).__init__()
 
         self.in_channels = model_config["in_channels"]
