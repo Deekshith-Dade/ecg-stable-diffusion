@@ -8,10 +8,10 @@ import torch
 import torch.optim as optim
 from vq_vae.vqvae import VQVAE
 from models.unet import Unet
-from linear_noise_schedule import LinearNoiseScheduler
+from diffusion.scheduler import LinearNoiseScheduler, CosineNoiseScheduler
 from utils.text_utils import get_tokenizer_and_model, get_text_representation
 from diff_utils import drop_text_condition, drop_class_condition
-from data.dataset import getKCLTrainTestDataset
+from dataset.dataset import getKCLTrainTestDataset
 from torch.utils.data import DataLoader
 from sampling.sampling_utils import diff_random_sample
 from utils.plot_utils import visualizeLeads_comp
@@ -47,9 +47,10 @@ def train(config):
     stds = dataset_config['stds']
     
     #### Noise Scheduler #####
-    scheduler = LinearNoiseScheduler(num_timesteps=diffusion_config['num_timesteps'],
-                                     beta_start=diffusion_config['beta_start'],
-                                     beta_end=diffusion_config['beta_end'])
+    scheduler = CosineNoiseScheduler(num_timesteps=diffusion_config['num_timesteps'],
+                                    #  beta_start=diffusion_config['beta_start'],
+                                    #  beta_end=diffusion_config['beta_end']
+                                     )
     
     # Condition Related Components
     text_tokenizer = None
@@ -93,7 +94,7 @@ def train(config):
         
     num_epochs = train_config['epochs']
     optimizer = optim.Adam(model.parameters(), lr=train_config['ldm_lr'])
-    criterion = torch.nn.MSELoss()
+    criterion = torch.nn.functional.mse_loss
     
     if not dataset.use_latents:
         assert vae is not None
@@ -105,6 +106,7 @@ def train(config):
         model.train()
         
         losses = []
+        perplexities = []
         for data in tqdm(dataloader):
             cond_input = None
             if condition_config is not None:
@@ -116,7 +118,7 @@ def train(config):
             if not dataset.use_latents:
                 with torch.no_grad():
                     im = (im - means) / stds
-                    _, im, _ = vae.encode(im)
+                    _, im, perplexity, _, _ = vae.encode(im)
             
             ##### Conditional Inputs #####
             if 'text' in condition_types:
@@ -150,12 +152,14 @@ def train(config):
             noise_pred = model(noisy_im, t, cond_input=cond_input)
             loss = criterion(noise_pred, noise)
             losses.append(loss.item())
+            perplexities.append(perplexity.item() if not dataset.use_latents else 0)
             loss.backward()
             optimizer.step()
         
         training_log = dict(
                 step = epoch_idx,
-                loss = np.mean(losses)
+                loss = np.mean(losses),
+                perplexity = np.mean(perplexities) if perplexities else 0
         )
             
         

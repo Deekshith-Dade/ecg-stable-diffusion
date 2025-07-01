@@ -67,9 +67,9 @@ class VQVAE(nn.Module):
         z_e = self.encoder_conv_out(z_e)
         
         z_e = self.pre_quant_conv(z_e)
-        embedding_loss, z_q, perplexity, _, _ = self.vector_quantization(z_e)
+        embedding_loss, z_q, perplexity, min_encodings, min_encoding_indices = self.vector_quantization(z_e)
         
-        return embedding_loss, z_q, perplexity
+        return embedding_loss, z_q, perplexity, min_encodings, min_encoding_indices
 
     def decode(self, z_q):
         out = z_q
@@ -84,8 +84,8 @@ class VQVAE(nn.Module):
         return out
 
     def forward(self, x, verbose=False):
-        embedding_loss, z_q, perplexity = self.encode(x)
+        embedding_loss, z_q, perplexity, min_encodings, min_encoding_indices = self.encode(x)
         x_hat = self.decode(z_q)
         if verbose:
             print(f"Embedding Loss: {embedding_loss.item()}, Perplexity: {perplexity.item()}")
-        return embedding_loss, x_hat, perplexity
+        return embedding_loss, x_hat, perplexity, min_encodings, min_encoding_indices

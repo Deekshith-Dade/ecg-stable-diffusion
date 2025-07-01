@@ -8,8 +8,9 @@ def diff_random_sample(model, vae, scheduler, train_config, diffusion_model_conf
 
     model.eval()
     vae.eval()
+    channels = autoencoder_model_config['embedding_dim']
     xt = torch.randn(2,
-                     8,
+                     channels,
                      8, 312).to(device)
     
      

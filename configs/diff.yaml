@@ -4,7 +4,7 @@ dataset_config:
   timeCutOff: 1800
   lowerCutOff: 0
   randSeed: 7777
-  scale_training_size: 1.0
+  scale_training_size: 0.05
   kcl_params:
     lowThresh: 4.0
     highThresh: 5.0
@@ -14,9 +14,9 @@ autoencoder_config:
   dim_mults: [1, 2, 4]
   in_channels: 1
   init_dim: 128
-  embedding_dim: 8
+  embedding_dim: 16
   codebook_size: 1024
-  beta: 0.25
+  beta: 0.5
   attention: False
   norm_channels: 32
 
@@ -28,12 +28,12 @@ diffusion_params:
   
 
 ldm_config:
-  in_channels: 8
+  in_channels: 32
   dim: 128
   init_dim: 128
   dim_mults: [2, 4, 8, 8]
-  attn_dim_head: 32
-  attn_heads: 16
+  attn_dim_head: 64
+  attn_heads: 8
   condition_config: 
     condition_types: ['class']
     text_condition_config:
@@ -42,13 +42,13 @@ ldm_config:
       cond_drop_prob: 0.35
     class_condition_config:
       num_classes: 2
-      cond_drop_prob: 0.25
+      cond_drop_prob: 0.35
 
 train_params:
   task_name: ''
-  vqvae_autoencoder_ckpt_name: "/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/vq_vae/results/vqvae_2025-06-07_01-51-22/checkpoint.pt"
+  vqvae_autoencoder_ckpt_name: "/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/vq_vae/results/vqvae_2025-06-22_22-01-09/best_perplexity_checkpoint.pt"
   epochs: 200
   results_folder: "results/diff_checkpoint.pt"
-  ldm_lr: 0.00001
-  batch_size: 12
+  ldm_lr: 0.000003
+  batch_size: 20
   cf_guidance_scale: 6.0

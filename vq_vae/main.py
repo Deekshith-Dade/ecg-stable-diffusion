@@ -20,28 +20,35 @@ from tqdm.auto import tqdm
 import wandb
 import matplotlib.pyplot as plt
 
-from data import dataset
+from dataset import dataset
+from dataset.celeb_dataset import CelebDataset
 from vq_vae.vqvae import VQVAE
+from models.image.vqvae import VQVAE as VQVAEImg
 from utils.plot_utils import visualizeLeads_comp
+import torchvision
+from torchvision.utils import make_grid
+
+recon_criterion = nn.MSELoss()
 
 
 parser = argparse.ArgumentParser()
 
 timestamp = ""
 
-parser.add_argument("--batch_size", type=int, default=48)
+parser.add_argument("--batch_size", type=int, default=28)
 parser.add_argument("--n_epochs", type=int, default=250)
-parser.add_argument("--learning_rate", type=float, default=5e-6)
+parser.add_argument("--learning_rate", type=float, default=1e-5)
 parser.add_argument("--log_interval", type=int, default=1)
-parser.add_argument("--scale_training_size", type=float, default=1.0)
+parser.add_argument("--scale_training_size", type=float, default=0.25)
 parser.add_argument("--save_every", type=int, default=10, help="Save model every n epochs")
-parser.add_argument("--logtowandb", action='store_true', default=False, help="Log to wandb")
+parser.add_argument("--logtowandb", action='store_true', default=True, help="Log to wandb")
 
 args = parser.parse_args()
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
-train_dataset, val_dataset = dataset.get_datasets(args.scale_training_size)
+# train_dataset, val_dataset = dataset.get_datasets(args.scale_training_size)
+train_dataset = CelebDataset(split='train')
 
 def ddp_setup():
     init_process_group(backend='nccl')
@@ -74,6 +81,23 @@ def calculate_mean_std(dataset):
     stds = stds.to(device)
     return means, stds
 
+def plot_codebook_usage_heatmap(usage_counts: torch.Tensor, codebook_size: int = 1024):
+    usage = usage_counts.float()
+    usage_ratio = usage / usage.sum()
+
+    fig, axs = plt.subplots(1, 1, figsize=(10, 1))
+    im = axs.imshow(usage_ratio.view(1, -1), cmap="viridis", aspect="auto")
+
+    axs.set_title("Codebook Usage Heatmap")
+    axs.set_xlabel("Codebook Index")
+    axs.set_yticks([])
+
+    # Add a colorbar
+    cbar = fig.colorbar(im, ax=axs, orientation="vertical", pad=0.01)
+    cbar.set_label("Usage Ratio")
+
+    return fig
+
 def train(model, optimizer, dataloader, means, stds, results_folder):
     
     # Check if we're running with distributed training
@@ -92,6 +116,7 @@ def train(model, optimizer, dataloader, means, stds, results_folder):
     'loss_vals': [],
     'perplexities': [],
     'embedding_loss': [],
+    'min_encoding_indices': [],
     }
     
     epochs_run = 0
@@ -110,6 +135,7 @@ def train(model, optimizer, dataloader, means, stds, results_folder):
         means = means.to(gpu_id)
         stds = stds.to(gpu_id)
     
+    best_avg_perplexity = float('-inf')
     for epoch in range(epochs_run, args.n_epochs):
         print(f"Training step {epoch+1}/{args.n_epochs}", end='\r')
         
@@ -119,24 +145,31 @@ def train(model, optimizer, dataloader, means, stds, results_folder):
         for batch_idx, batch in enumerate(tqdm(dataloader, desc=f"Epoch {epoch+1}")):
             # Use the correct device (GPU ID for DDP, or global device for single GPU)
             target_device = gpu_id if use_ddp else device
-            x = batch['image'].unsqueeze(1).to(target_device)
+            # x = batch['image'].unsqueeze(1).to(target_device)
+            # x = batch['image'].to(target_device)
             # import pdb; pdb.set_trace()  
-            x = (x - means) / stds
+            # x = (x - means) / stds
             
             optimizer.zero_grad()
             
-            embedding_loss, x_hat, perplexity = model(x)
-            recon_loss = torch.mean((x_hat - x) ** 2 / (stds ** 2))
+            # embedding_loss, x_hat, perplexity, min_encodings, min_encoding_indices = model(x)
+            batch = batch.to(device)
+            x_hat, z, quantize_losses = model(batch)
+            
+            recon_loss = recon_criterion(x_hat, batch)
+            embedding_loss = quantize_losses['codebook_loss'] + 0.25 * quantize_losses['commitment_loss']
             loss = recon_loss + embedding_loss
             
             loss.backward()
             optimizer.step()
             
             results['recon_errors'].append(recon_loss.cpu().detach().numpy())
-            results['perplexities'].append(perplexity.cpu().detach().numpy())
+            # results['perplexities'].append(perplexity.cpu().detach().numpy())
             results['loss_vals'].append(loss.cpu().detach().numpy())
             results["n_updates"] = epoch * len(dataloader) + batch_idx + 1
             results["embedding_loss"].append(embedding_loss.cpu().detach().numpy())
+            # results["min_encoding_indices"].append(min_encoding_indices.cpu().detach().numpy())
+            
 
 
         if (gpu_id == 0) and (epoch % args.save_every == 0 or epoch == args.n_epochs - 1):
@@ -157,23 +190,49 @@ def train(model, optimizer, dataloader, means, stds, results_folder):
                     step = results['n_updates'],
                     recon_error = np.mean(results['recon_errors'][-args.log_interval * len(dataloader):]),
                     loss = np.mean(results['loss_vals'][-args.log_interval * len(dataloader):]),
-                    perplexity = np.mean(results['perplexities'][-args.log_interval * len(dataloader):]),
+                    # perplexity = np.mean(results['perplexities'][-args.log_interval * len(dataloader):]),
                     embedding_loss = np.mean(results['embedding_loss'][-args.log_interval * len(dataloader):]),
+                    # unique_codes = len(np.unique(np.concatenate(results['min_encoding_indices'][-args.log_interval * len(dataloader):]))),
                 )
 
-            print(f"Step {results['n_updates']}, Recon Error: {training_log['recon_error']}, Loss: {training_log['loss']}, Perplexity: {training_log['perplexity']}, Embedding Loss: {training_log['embedding_loss']}")
+            
+            # print(f"Step {results['n_updates']}, Recon Error: {training_log['recon_error']}, Loss: {training_log['loss']}, Perplexity: {training_log['perplexity']}, Embedding Loss: {training_log['embedding_loss']},  Unique Codes: {training_log['unique_codes']}")
+            print(f"Step {results['n_updates']}, Recon Error: {training_log['recon_error']}, Loss: {training_log['loss']}, Embedding Loss: {training_log['embedding_loss']}")
+            
+            # if training_log['perplexity'] > best_avg_perplexity:
+            #     best_avg_perplexity = training_log['perplexity']
+            #     torch.save(checkpoint, f"{results_folder}/best_perplexity_checkpoint.pt")
 
             if args.logtowandb:
-                x = x * stds + means
-                x_hat = x_hat * stds + means
+                # x = x * stds + means
+                # x_hat = x_hat * stds + means
 
-                fig1 = visualizeLeads_comp(x[0].squeeze().detach().cpu(), "comparison 1", x_hat[0].squeeze().detach().cpu(), f"{results_folder}/plots/{results['n_updates']}_fig1.png")
-                plt.close()
-                fig2 = visualizeLeads_comp(x[1].squeeze().detach().cpu(), "comparison 2", x_hat[1].squeeze().detach().cpu(), f"{results_folder}/plots/{results['n_updates']}_fig2.png")
-                plt.close()
+                # fig1 = visualizeLeads_comp(x[0].squeeze().detach().cpu(), "comparison 1", x_hat[0].squeeze().detach().cpu(), f"{results_folder}/plots/{results['n_updates']}_fig1.png")
+                # plt.close()
+                # fig2 = visualizeLeads_comp(x[1].squeeze().detach().cpu(), "comparison 2", x_hat[1].squeeze().detach().cpu(), f"{results_folder}/plots/{results['n_updates']}_fig2.png")
+                # plt.close()
                 
-                training_log['fig1'] = fig1
-                training_log['fig2'] = fig2
+                sample_size = min(8, batch.shape[0])
+                save_output = torch.clamp(x_hat[:sample_size], -1., 1.).detach().cpu()
+                save_output = ((save_output + 1) / 2)
+                save_input = ((batch[:sample_size] + 1) / 2).detach().cpu()
+
+                grid = make_grid(torch.cat([save_input, save_output], dim=0), nrow=sample_size)
+                img = wandb.Image(grid)
+
+                # recent_indices = results['min_encoding_indices'][-args.log_interval * len(dataloader):]
+                # flattened_indices = torch.cat([torch.as_tensor(x).view(-1) for x in recent_indices], dim=0)
+
+                # usage = torch.bincount(flattened_indices, minlength= model.module.n_embeddings).float()
+                # usage_ratio = usage / usage.sum()
+
+                # fig3 = plot_codebook_usage_heatmap(usage.detach().cpu(), model.module.n_embeddings)
+                # plt.close(fig3)
+                
+                training_log['fig1'] = img
+                # training_log['fig2'] = img
+                # training_log['fig3'] = fig3
+                # training_log['usage_ratio'] = usage_ratio
 
                 wandb.log(training_log)
 
@@ -196,7 +255,7 @@ def main():
     print(f"Means: {means}, Stds: {stds}")
     # torch.save({'mean': means, 'std': stds}, '/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/data/ecg_train_stats.pt')
 
-    path = "/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/configs/diff.yaml"
+    path = "/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/configs/im_diff.yaml"
     with open(path, 'r') as f:
         try:
             model_config = yaml.safe_load(f)
@@ -216,20 +275,20 @@ def main():
                                   drop_last=True,
                                   sampler=DistributedSampler(train_dataset, drop_last=True, shuffle=True) if "LOCAL_RANK" in os.environ else None)
     
-    model = VQVAE(model_config=model_config['autoencoder_config'])
+    model = VQVAEImg(im_channels=3, model_config=model_config['autoencoder_config'])
 
     optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=1e-4)
 
     model.train()
 
     
-    results_folder = f'./results/vqvae_{formatted_time}'
+    results_folder = f'./results/imgs/vqvae_{formatted_time}'
     os.makedirs(results_folder, exist_ok=True)
     os.makedirs(f"{results_folder}/plots", exist_ok=True)
     
     if gpu_id == 0 and args.logtowandb:
         wandbrun = wandb.init(
-            project="ecg_vqvae",
+            project="img_vqvae",
             notes = f"A UNET and 1M dataset",
             tags = ["vqvae", "bigdataset"],
             entity="deekshith",
