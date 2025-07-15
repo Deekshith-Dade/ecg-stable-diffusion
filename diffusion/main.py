@@ -7,11 +7,14 @@ import numpy as np
 import torch
 import torch.optim as optim
 from vq_vae.vqvae import VQVAE
+from models.image.vqvae import VQVAE as VQVAEImg
 from models.unet import Unet
+from models.image.unet_cond_base import Unet as UnetImg
 from diffusion.scheduler import LinearNoiseScheduler, CosineNoiseScheduler
 from utils.text_utils import get_tokenizer_and_model, get_text_representation
 from diff_utils import drop_text_condition, drop_class_condition
 from dataset.dataset import getKCLTrainTestDataset
+from dataset.celeb_dataset import CelebDataset
 from torch.utils.data import DataLoader
 from sampling.sampling_utils import diff_random_sample
 from utils.plot_utils import visualizeLeads_comp
@@ -24,6 +27,8 @@ from torch.utils.data.distributed import DistributedSampler
 import wandb
 import yaml
 from tqdm import tqdm
+from torchvision.utils import make_grid
+
 
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
 logtowandb = True
@@ -43,13 +48,14 @@ def train(config):
     diffusion_model_config = config['ldm_config']
     autoencoder_model_config = config['autoencoder_config']
     train_config = config['train_params']
-    means = dataset_config['means']
-    stds = dataset_config['stds']
+    # means = dataset_config['means']
+    # stds = dataset_config['stds']
+    
     
     #### Noise Scheduler #####
-    scheduler = CosineNoiseScheduler(num_timesteps=diffusion_config['num_timesteps'],
-                                    #  beta_start=diffusion_config['beta_start'],
-                                    #  beta_end=diffusion_config['beta_end']
+    scheduler = LinearNoiseScheduler(num_timesteps=diffusion_config['num_timesteps'],
+                                     beta_start=diffusion_config['beta_start'],
+                                     beta_end=diffusion_config['beta_end']
                                      )
     
     # Condition Related Components
@@ -68,23 +74,35 @@ def train(config):
                 empty_text_embed = get_text_representation([''], text_tokenizer, text_model, device)
     
     # Load Dataset and stuff
-    dataset, val_dataset  = getKCLTrainTestDataset(dataset_config)
-    dataloader = DataLoader(dataset, batch_size=train_config['batch_size'], shuffle=False, drop_last=True,
-                            pin_memory=True, sampler=DistributedSampler(dataset, drop_last=True, shuffle=True) if use_ddp else None)
+    # dataset, val_dataset  = getKCLTrainTestDataset(dataset_config)
+    im_dataset = CelebDataset(split="train",
+                              im_path='/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/data/CelebAMask-HQ',
+                              im_size= 256,
+                              im_channels= 3,
+                              use_latents=False,
+                              latent_path=None,
+                              condition_config=condition_config
+                              )
     
-    model = Unet(channels=diffusion_model_config['in_channels'], model_config=diffusion_model_config).to(device)
+    
+    dataloader = DataLoader(im_dataset, batch_size=train_config['batch_size'], shuffle=False, drop_last=True,
+                            pin_memory=True, sampler=DistributedSampler(im_dataset, drop_last=True, shuffle=True) if use_ddp else None)
+    
+    # model = Unet(channels=diffusion_model_config['in_channels'], model_config=diffusion_model_config).to(device)
+    model = UnetImg(im_channels=autoencoder_model_config['z_channels'], model_config=diffusion_model_config).to(device)
     
     if use_ddp:
         model = DDP(model, device_ids=[device])
-        means = means.to(device)
-        stds = stds.to(device)
+        # means = means.to(device)
+        # stds = stds.to(device)
     
     model.train()
     
     vae = None
-    if not dataset.use_latents:
+    if not im_dataset.use_latents:
         print('Loading vqvae as latents not present')
-        vae = VQVAE(model_config=autoencoder_model_config).to(device)
+        # vae = VQVAE(model_config=autoencoder_model_config).to(device)
+        vae = VQVAEImg(im_channels=3, model_config=autoencoder_model_config).to(device)
         vae.eval()
         
         if os.path.exists(train_config['vqvae_autoencoder_ckpt_name']):
@@ -96,7 +114,7 @@ def train(config):
     optimizer = optim.Adam(model.parameters(), lr=train_config['ldm_lr'])
     criterion = torch.nn.functional.mse_loss
     
-    if not dataset.use_latents:
+    if not im_dataset.use_latents:
         assert vae is not None
         for param in vae.parameters():
             param.requires_grad = False
@@ -110,15 +128,18 @@ def train(config):
         for data in tqdm(dataloader):
             cond_input = None
             if condition_config is not None:
-                im, cond_input = data['image'], data['cond_inputs']
+                # im, cond_input = data['image'], data['cond_inputs']
+                im, cond_input = data
             else:
-                im = data['image']
+                # im = data['image']
+                im = data
             optimizer.zero_grad()
             im = im.float().to(device)
-            if not dataset.use_latents:
+            if not im_dataset.use_latents:
                 with torch.no_grad():
-                    im = (im - means) / stds
-                    _, im, perplexity, _, _ = vae.encode(im)
+                    # im = (im - means) / stds
+                    # _, im, perplexity, _, _ = vae.encode(im)
+                    im, _ = vae.encode(im)
             
             ##### Conditional Inputs #####
             if 'text' in condition_types:
@@ -152,14 +173,16 @@ def train(config):
             noise_pred = model(noisy_im, t, cond_input=cond_input)
             loss = criterion(noise_pred, noise)
             losses.append(loss.item())
-            perplexities.append(perplexity.item() if not dataset.use_latents else 0)
+            # perplexities.append(perplexity.item() if not dataset.use_latents else 0)
             loss.backward()
             optimizer.step()
+            
+            
         
         training_log = dict(
                 step = epoch_idx,
                 loss = np.mean(losses),
-                perplexity = np.mean(perplexities) if perplexities else 0
+                # perplexity = np.mean(perplexities) if perplexities else 0
         )
             
         
@@ -170,12 +193,16 @@ def train(config):
                                      diffusion_config, dataset_config, text_tokenizer,
                                      text_model, device=gpu_id)
             
-            fig1 = visualizeLeads_comp(ims[0].squeeze().detach().cpu(), text_prompts[0], ims[0].squeeze().detach().cpu(), f"{train_config['results_folder']}/plots/{epoch_idx}_fig1.png")
-            plt.close()
-            fig2 = visualizeLeads_comp(ims[1].squeeze().detach().cpu(), text_prompts[1], ims[1].squeeze().detach().cpu(), f"{train_config['results_folder']}/plots/{epoch_idx}_fig2.png")
-            plt.close()
-            training_log['fig1'] = fig1
-            training_log['fig2'] = fig2
+            # fig1 = visualizeLeads_comp(ims[0].squeeze().detach().cpu(), text_prompts[0], ims[0].squeeze().detach().cpu(), f"{train_config['results_folder']}/plots/{epoch_idx}_fig1.png")
+            # plt.close()
+            # fig2 = visualizeLeads_comp(ims[1].squeeze().detach().cpu(), text_prompts[1], ims[1].squeeze().detach().cpu(), f"{train_config['results_folder']}/plots/{epoch_idx}_fig2.png")
+            # plt.close()
+            # training_log['fig1'] = fig1
+            # training_log['fig2'] = fig2
+            grid = make_grid(ims, nrow=1)
+            img = wandb.Image(grid)
+            
+            training_log['fig'] = img
             
             wandb.log(training_log)
             torch.save(model.state_dict(), f"{train_config['results_folder']}/checkpoint.pt")
@@ -184,7 +211,8 @@ def train(config):
 
 
 def main():
-    config_path = "/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/configs/diff.yaml"
+    
+    config_path = "/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/configs/im_diff.yaml"
     with open(config_path, 'r') as file:
         try:
             config = yaml.safe_load(file)
@@ -208,7 +236,7 @@ def main():
     
     current_time = datetime.datetime.now()
     formatted_time = current_time.strftime("%Y-%m-%d_%H-%M-%S")
-    results_folder = f"./results/latent_{formatted_time}"
+    results_folder = f"./results/im_latent_{formatted_time}"
     os.makedirs(results_folder, exist_ok=True)
     os.makedirs(f"{results_folder}/plots", exist_ok=True)
     config['train_params']['results_folder'] = results_folder
@@ -223,13 +251,13 @@ def main():
     
     if (gpu_id == 0 or gpu_id == torch.device("cpu")) and logtowandb:
         wandbrun = wandb.init(
-            project = "latent_ecg",
+            project = "latent_img",
             notes = f"diffusion in latent space",
             tags= ["latent", "diffusion"],
             entity="deekshith",
             reinit=True,
             config=config,
-            name=f"{"latent"}_{formatted_time}"
+            name=f"{"im_latent"}_{formatted_time}"
         )
     
     train(config)       

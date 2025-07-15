@@ -10,3 +10,43 @@ autoencoder_config:
   num_down_layers : 2
   num_mid_layers : 2
   num_up_layers : 2
+
+dataset_config:
+  im_path: 'data/CelebAMask-HQ'
+  im_channels : 3
+  im_size : 256
+  name: 'celebhq'
+
+diffusion_params:
+  num_timesteps : 1000
+  beta_start : 0.00085
+  beta_end : 0.012
+
+ldm_config:
+  down_channels: [ 256, 384, 512, 768 ]
+  mid_channels: [ 768, 512 ]
+  down_sample: [ True, True, True ]
+  attn_down : [True, True, True]
+  time_emb_dim: 512
+  norm_channels: 32
+  num_heads: 16
+  conv_out_channels : 128
+  num_down_layers : 2
+  num_mid_layers : 2
+  num_up_layers : 2
+  condition_config:
+    condition_types: [ 'text' ]
+    text_condition_config:
+      text_embed_model: 'clip'
+      train_text_embed_model: False
+      text_embed_dim: 512
+      cond_drop_prob: 0.1
+
+train_params:
+  task_name: ''
+  vqvae_autoencoder_ckpt_name: "/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/vq_vae/results/imgs/vqvae_2025-07-06_13-23-21/checkpoint.pt"
+  epochs: 200
+  results_folder: "results/diff_checkpoint.pt"
+  ldm_lr: 0.000003
+  batch_size: 32
+  cf_guidance_scale: 6.0

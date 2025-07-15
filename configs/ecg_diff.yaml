@@ -50,5 +50,5 @@ train_params:
   epochs: 200
   results_folder: "results/diff_checkpoint.pt"
   ldm_lr: 0.000003
-  batch_size: 20
+  batch_size: 512
   cf_guidance_scale: 6.0
