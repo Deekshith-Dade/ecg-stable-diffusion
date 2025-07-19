@@ -64,17 +64,32 @@ class VQVAETraining:
             'disc_losses': [],
         }
 
-        self.beta = 0.25
-        self.disc_loss_weight = 0.5
-        self.disc_epoch_start = 25
+        self.beta = args.beta
+        self.disc_loss_weight = args.disc_loss_weight
+        self.disc_epoch_start = args.disc_epoch_start
         self.disc_criterion = torch.nn.BCEWithLogitsLoss()
         self.recon_criterion = torch.nn.MSELoss()
+        self.curr_epoch = 0
 
         # ToDO: load checkpoint
+        if args.vqvae_checkpoint:
+            checkpoint = torch.load(
+                args.vqvae_checkpoint, map_location=self.device)
+            self.results['n_updates'] = checkpoint['n_updates']
+            self.curr_epoch = checkpoint['epoch']
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            if self.discriminator:
+                self.discriminator.load_state_dict(
+                    checkpoint['discriminator_state_dict'])
+                if self.optimizer_disc:
+                    self.optimizer_disc.load_state_dict(
+                        checkpoint['optimizer_disc_state_dict'])
 
         self.target_device = self.gpu_id if self.use_ddp else self.device
         if self.use_ddp:
             self.model = DDP(self.model, device_ids=[self.gpu_id])
+
             if self.means is not None:
                 self.means = self.means.to(self.gpu_id)
             if self.stds is not None:
@@ -84,7 +99,7 @@ class VQVAETraining:
 
     def train(self):
 
-        for epoch in range(0, self.args.n_epochs):
+        for epoch in range(self.curr_epoch, self.args.n_epochs):
             print(f"Training step {epoch+1}/{self.args.n_epochs}", end='\r')
 
             if isinstance(self.dataloader.sampler, DistributedSampler):
@@ -106,8 +121,7 @@ class VQVAETraining:
                 encoding_indices = forward_output.encoding_indices
 
                 recon_loss = self.recon_criterion(x_hat, x)
-                embedding_loss = quantize_losses['codebook_loss'] + \
-                    self.beta * quantize_losses['commitment_loss']
+                embedding_loss = quantize_losses['commitment_loss']
                 loss = recon_loss + embedding_loss
 
                 # Discriminator on Generator

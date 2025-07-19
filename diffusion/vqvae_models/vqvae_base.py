@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import torch
 import torch.nn as nn
-from typing import Optional
 
 
 @dataclass
@@ -11,7 +10,7 @@ class QuantizeOutput:
     perplexity: torch.Tensor
     # only contains 'commitment_loss' and 'codebook_loss'
     quantize_losses: dict[str, torch.Tensor]
-    encodings: Optional[torch.Tensor]
+    encodings: torch.Tensor
     encoding_indices: torch.Tensor
 
 
