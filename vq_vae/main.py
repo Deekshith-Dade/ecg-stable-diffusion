@@ -38,19 +38,21 @@ timestamp = ""
 
 parser.add_argument("--batch_size", type=int, default=42)
 parser.add_argument("--n_epochs", type=int, default=450)
-parser.add_argument("--learning_rate", type=float, default=1e-4)
+parser.add_argument("--learning_rate", type=float, default=1e-5)
 parser.add_argument("--log_interval", type=int, default=1)
-parser.add_argument("--scale_training_size", type=float, default=0.1)
+parser.add_argument("--scale_training_size", type=float, default=0.5)
 parser.add_argument("--save_every", type=int, default=1,
                     help="Save model every n epochs")
 parser.add_argument("--logtowandb", action='store_true',
                     default=False, help="Log to wandb")
 parser.add_argument("--train_ecgs", action='store_true',
                     default=False, help="Train on ECGs")
-parser.add_argument("--learning_rate_disc", type=float, default=1e-4)
-parser.add_argument("--beta", type=float, default=0.25)
-parser.add_argument("--disc_epoch_start", type=int, default=25)
-parser.add_argument("--disc_loss_weight", type=float, default=0.5)
+parser.add_argument("--learning_rate_disc", type=float, default=1e-5)
+parser.add_argument("--beta", type=float, default=0.1)
+parser.add_argument("--disc_epoch_start", type=int, default=10)
+parser.add_argument("--disc_loss_weight", type=float, default=0.1)
+parser.add_argument("--vqvae_checkpoint", type=str, default=None,
+                    help="Path to the checkpoint to continue training from")
 
 
 args = parser.parse_args()
@@ -73,7 +75,10 @@ def main():
     current_time = datetime.datetime.now()
     formatted_time = current_time.strftime("%Y-%m-%d_%H-%M-%S")
 
-    args.vqvae_checkpoint = "/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/vq_vae/results/ecgs/vqvae_2025-07-18_18-23-09/checkpoint.pt"
+    args.vqvae_checkpoint = "/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/vq_vae/results/ecgs/vqvae_2025-07-26_14-23-52/checkpoint.pt"
+    project_name = "vqvae_" + formatted_time
+    if args.vqvae_checkpoint:
+        project_name = args.vqvae_checkpoint.split("/")[-2]
 
     train_ecgs = args.train_ecgs
     if train_ecgs:
@@ -105,11 +110,12 @@ def main():
         means=mean,
         stds=std,
         args=args,
-        autoencoder_config=model_config['autoencoder_config']
+        autoencoder_config=model_config['autoencoder_config'],
+        number_of_train_samples=len(train_dataset)
     )
 
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size,
-                                  shuffle=False, num_workers=8, pin_memory=True,
+                                  shuffle=False, num_workers=4, pin_memory=True,
                                   drop_last=True,
                                   sampler=DistributedSampler(train_dataset, drop_last=True, shuffle=True) if "LOCAL_RANK" in os.environ else None)
 
@@ -142,7 +148,7 @@ def main():
     }
     model.train()
 
-    results_folder = f'./results/{"ecgs" if train_ecgs else "imgs"}/vqvae_{formatted_time}'
+    results_folder = f'./results/{"ecgs" if train_ecgs else "imgs"}/{project_name}'
     os.makedirs(results_folder, exist_ok=True)
     os.makedirs(f"{results_folder}/plots", exist_ok=True)
 
@@ -155,8 +161,12 @@ def main():
             entity="deekshith",
             reinit=True,
             config=config,
-            name=f"{"vqvae"}_{formatted_time}"
+            name=project_name,
+            resume="allow",
+            id="tik4yrsl"
         )
+        run_id = wandbrun.id
+        print(f"Run ID: {run_id}")
 
     trainer = VQVAETraining(
         args=args,

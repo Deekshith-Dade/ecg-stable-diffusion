@@ -73,6 +73,7 @@ class VQVAETraining:
 
         # ToDO: load checkpoint
         if args.vqvae_checkpoint:
+            print(f"Loading checkpoint from {args.vqvae_checkpoint}")
             checkpoint = torch.load(
                 args.vqvae_checkpoint, map_location=self.device)
             self.results['n_updates'] = checkpoint['n_updates']
@@ -90,6 +91,19 @@ class VQVAETraining:
         if self.use_ddp:
             self.model = DDP(self.model, device_ids=[self.gpu_id])
 
+            # Move optimizer state to the correct device
+            for state in self.optimizer.state.values():
+                for k, v in state.items():
+                    if isinstance(v, torch.Tensor):
+                        state[k] = v.to(self.gpu_id)
+
+            if self.discriminator and self.optimizer_disc:
+                # Move discriminator optimizer state to the correct device
+                for state in self.optimizer_disc.state.values():
+                    for k, v in state.items():
+                        if isinstance(v, torch.Tensor):
+                            state[k] = v.to(self.gpu_id)
+
             if self.means is not None:
                 self.means = self.means.to(self.gpu_id)
             if self.stds is not None:
@@ -99,7 +113,7 @@ class VQVAETraining:
 
     def train(self):
 
-        for epoch in range(self.curr_epoch, self.args.n_epochs):
+        for epoch in range(self.curr_epoch+1, self.args.n_epochs):
             print(f"Training step {epoch+1}/{self.args.n_epochs}", end='\r')
 
             if isinstance(self.dataloader.sampler, DistributedSampler):
@@ -174,7 +188,7 @@ class VQVAETraining:
             # Logging and Saving
             # Saving Checkpoint
             if self.gpu_id == 0 and (epoch % self.args.save_every == 0 or epoch == self.args.n_epochs - 1):
-                self._save_checkpoint(epoch)
+                self._save_checkpoint(epoch, 5)
 
             # Logging
             training_log = {}
@@ -231,7 +245,7 @@ class VQVAETraining:
 
                     wandb.log(training_log)
 
-    def _save_checkpoint(self, epoch: int):
+    def _save_checkpoint(self, epoch: int, save_interval: int = 5):
         print(f"Saving checkpoint at epoch {epoch}")
         if self.use_ddp:
             model_state_dict = self.model.module.state_dict()  # type: ignore
@@ -249,6 +263,10 @@ class VQVAETraining:
         }
         torch.save(
             checkpoint, f"{self.results_folder}/checkpoint.pt")
+
+        if save_interval > 0 and epoch % save_interval == 0:
+            torch.save(
+                checkpoint, f"{self.results_folder}/checkpoint_{epoch}.pt")
 
     def _prepare_images(self, x: torch.Tensor, x_hat: torch.Tensor, n_samples: int = 8):
         x = x.cpu().detach()
