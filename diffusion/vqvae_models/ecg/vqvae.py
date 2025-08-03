@@ -1,9 +1,11 @@
-from .quantizer import VectorQuantizerEMA
+from vector_quantize_pytorch import VectorQuantize
+from .quantizer import VectorQuantizer
 from .decoder import VQVAEDecoder
 from .encoder import VQVAEEncoder
-from ..vqvae_base import VQVAEBase, EncodeOutput, DecodeOutput, ForwardOutput
+from ..vqvae_base import VQVAEBase, EncodeOutput, DecodeOutput, ForwardOutput, QuantizeOutput
 import torch.nn as nn
 import sys
+import torch
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -30,6 +32,7 @@ class VQVAEECG(VQVAEBase):
 
         self.codebook_size = model_config["codebook_size"]
         self.embedding_dim = model_config["embedding_dim"]
+        self.beta = model_config["beta"]
 
         dim_mults = model_config["dim_mults"]
         dims = [self.dim, *map(lambda m: self.dim * m, dim_mults)]
@@ -47,8 +50,19 @@ class VQVAEECG(VQVAEBase):
         self.pre_quant_conv = nn.Conv2d(
             self.embedding_dim, self.embedding_dim, kernel_size=1, padding=0)
 
-        self.vector_quantization = VectorQuantizerEMA(
-            num_embeddings=self.codebook_size, embedding_dim=self.embedding_dim
+        # self.vector_quantization = VectorQuantizer(
+        #     num_embeddings=self.codebook_size, embedding_dim=self.embedding_dim
+        # )
+        self.vector_quantization = VectorQuantize(
+            dim=self.embedding_dim,                     # Your embedding_dim
+            codebook_size=self.codebook_size,         # Your num_embeddings
+            accept_image_fmap=True,
+            # The 'beta' value. Tune this! Try 1.0 if perplexity is low.
+            commitment_weight=self.beta,
+            kmeans_init=True,
+            ema_update=True,
+            threshold_ema_dead_code=2,
+            sync_codebook="LOCAL_RANK" in os.environ
         )
 
         self.post_quant_conv = nn.Conv2d(
@@ -71,9 +85,20 @@ class VQVAEECG(VQVAEBase):
         z_e = self.encoder_conv_out(z_e)
 
         z_e = self.pre_quant_conv(z_e)
-        quant_output = self.vector_quantization(z_e)
+        quantized, indices, commit_loss = self.vector_quantization(z_e)
 
-        return EncodeOutput(quant_output)
+        avg_probs = torch.histc(indices.float(),
+                                bins=self.codebook_size,
+                                min=0,
+                                max=self.codebook_size - 1).float()
+        avg_probs /= indices.numel()
+        perplexity = torch.exp(-torch.sum(avg_probs *
+                               torch.log(avg_probs + 1e-10)))
+        quantize_losses = {
+            'commitment_loss': commit_loss,
+        }
+
+        return EncodeOutput(quantize_output=QuantizeOutput(z_q=quantized, perplexity=perplexity, quantize_losses=quantize_losses, encoding_indices=indices, encodings=None))
 
     def decode(self, z_q) -> DecodeOutput:
         out = z_q

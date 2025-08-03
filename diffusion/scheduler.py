@@ -8,48 +8,54 @@ class LinearNoiseScheduler:
         self.num_timesteps = num_timesteps
         self.beta_start = beta_start
         self.beta_end = beta_end
-        
+
         self.betas = (
-            torch.linspace(beta_start ** 0.5, beta_end ** 0.5, num_timesteps) ** 2
+            torch.linspace(beta_start ** 0.5, beta_end **
+                           0.5, num_timesteps) ** 2
         )
         self.alphas = 1. - self.betas
         self.alpha_cum_prod = torch.cumprod(self.alphas, dim=0)
         self.sqrt_alpha_cum_prod = torch.sqrt(self.alpha_cum_prod)
-        self.sqrt_one_minus_alpha_cum_prod = torch.sqrt(1 - self.alpha_cum_prod)
-    
+        self.sqrt_one_minus_alpha_cum_prod = torch.sqrt(
+            1 - self.alpha_cum_prod)
+
     def add_noise(self, original, noise, t):
         original_shape = original.shape
         batch_size = original_shape[0]
-        
-        sqrt_alpha_cum_prod = self.sqrt_alpha_cum_prod.to(original.device)[t].reshape(batch_size)
-        sqrt_one_minus_alpha_cum_prod = self.sqrt_one_minus_alpha_cum_prod.to(original.device)[t].reshape(batch_size)
-        
+
+        sqrt_alpha_cum_prod = self.sqrt_alpha_cum_prod.to(original.device)[
+            t].reshape(batch_size)
+        sqrt_one_minus_alpha_cum_prod = self.sqrt_one_minus_alpha_cum_prod.to(
+            original.device)[t].reshape(batch_size)
+
         for _ in range(len(original_shape) - 1):
             sqrt_alpha_cum_prod = sqrt_alpha_cum_prod.unsqueeze(-1)
-            
+
         for _ in range(len(original_shape) - 1):
-            sqrt_one_minus_alpha_cum_prod = sqrt_one_minus_alpha_cum_prod.unsqueeze(-1)
-            
+            sqrt_one_minus_alpha_cum_prod = sqrt_one_minus_alpha_cum_prod.unsqueeze(
+                -1)
+
         return (sqrt_alpha_cum_prod.to(original.device) * original + sqrt_one_minus_alpha_cum_prod * noise)
-    
-    
+
     def sample_prev_timestep(self, xt, noise_pred, t):
-        
+
         x0 = ((xt - (self.sqrt_one_minus_alpha_cum_prod.to(xt.device)[t] * noise_pred)) /
               torch.sqrt(self.alpha_cum_prod.to(xt.device)[t]))
         x0 = torch.clamp(x0, -1., 1.)
-        
-        mean = xt - ((self.betas.to(xt.device)[t] * noise_pred) / (self.sqrt_one_minus_alpha_cum_prod.to(xt.device)[t]))
+
+        mean = xt - ((self.betas.to(xt.device)[t] * noise_pred) / (
+            self.sqrt_one_minus_alpha_cum_prod.to(xt.device)[t]))
         mean = mean / torch.sqrt(self.alphas.to(xt.device)[t])
-        
+
         if t == 0:
             return mean, x0
         else:
-            variance = (1 - self.sqrt_alpha_cum_prod.to(xt.device)[t-1]) / (1.0 - self.alpha_cum_prod.to(xt.device)[t])
+            variance = (1 - self.sqrt_alpha_cum_prod.to(xt.device)
+                        [t-1]) / (1.0 - self.alpha_cum_prod.to(xt.device)[t])
             variance = variance * self.betas.to(xt.device)[t]
             sigma = variance ** 0.5
             z = torch.randn(xt.shape).to(xt.device)
-            
+
             return mean + sigma * z, x0
 
 
@@ -57,59 +63,80 @@ class CosineNoiseScheduler:
     def __init__(self, num_timesteps, s=0.008):
         """
         Cosine noise scheduler from "Improved Denoising Diffusion Probabilistic Models"
-        
+
         Args:
             num_timesteps: Number of diffusion timesteps
             s: Small offset to prevent beta from being too small near t=0
         """
         self.num_timesteps = num_timesteps
         self.s = s
-        
+
         # Generate cosine schedule
-        steps = torch.arange(num_timesteps + 1, dtype=torch.float32) / num_timesteps
+        steps = torch.arange(
+            num_timesteps + 1, dtype=torch.float32) / num_timesteps
         alpha_cum_prod = torch.cos((steps + s) / (1 + s) * math.pi / 2) ** 2
         alpha_cum_prod = alpha_cum_prod / alpha_cum_prod[0]
-        
+
         self.alpha_cum_prod = alpha_cum_prod[:-1]
         self.alpha_cum_prod_prev = alpha_cum_prod[1:]
-        
+
         self.betas = 1 - (self.alpha_cum_prod / self.alpha_cum_prod_prev)
         self.betas = torch.clamp(self.betas, 0, 0.999)
-        
+
         self.alphas = 1. - self.betas
         self.sqrt_alpha_cum_prod = torch.sqrt(self.alpha_cum_prod)
-        self.sqrt_one_minus_alpha_cum_prod = torch.sqrt(1 - self.alpha_cum_prod)
-    
+        self.sqrt_one_minus_alpha_cum_prod = torch.sqrt(
+            1 - self.alpha_cum_prod)
+
     def add_noise(self, original, noise, t):
         original_shape = original.shape
         batch_size = original_shape[0]
-        
-        sqrt_alpha_cum_prod = self.sqrt_alpha_cum_prod.to(original.device)[t].reshape(batch_size)
-        sqrt_one_minus_alpha_cum_prod = self.sqrt_one_minus_alpha_cum_prod.to(original.device)[t].reshape(batch_size)
-        
+
+        sqrt_alpha_cum_prod = self.sqrt_alpha_cum_prod.to(original.device)[
+            t].reshape(batch_size)
+        sqrt_one_minus_alpha_cum_prod = self.sqrt_one_minus_alpha_cum_prod.to(
+            original.device)[t].reshape(batch_size)
+
         for _ in range(len(original_shape) - 1):
             sqrt_alpha_cum_prod = sqrt_alpha_cum_prod.unsqueeze(-1)
-            
+
         for _ in range(len(original_shape) - 1):
-            sqrt_one_minus_alpha_cum_prod = sqrt_one_minus_alpha_cum_prod.unsqueeze(-1)
-            
-        return (sqrt_alpha_cum_prod.to(original.device) * original + sqrt_one_minus_alpha_cum_prod * noise)
-    
+            sqrt_one_minus_alpha_cum_prod = sqrt_one_minus_alpha_cum_prod.unsqueeze(
+                -1)
+
+        return (sqrt_alpha_cum_prod * original + sqrt_one_minus_alpha_cum_prod * noise)
+
     def sample_prev_timestep(self, xt, noise_pred, t):
-        
-        x0 = ((xt - (self.sqrt_one_minus_alpha_cum_prod.to(xt.device)[t] * noise_pred)) /
-              torch.sqrt(self.alpha_cum_prod.to(xt.device)[t]))
-        x0 = torch.clamp(x0, -1., 1.)
-        
-        mean = xt - ((self.betas.to(xt.device)[t] * noise_pred) / (self.sqrt_one_minus_alpha_cum_prod.to(xt.device)[t]))
-        mean = mean / torch.sqrt(self.alphas.to(xt.device)[t])
-        
+        """
+        Sample x_{t-1} from x_t and predicted noise
+        """
+        # Move tensors to device once
+        device = xt.device
+        alpha_cum_prod_t = self.alpha_cum_prod.to(device)[t]
+        alpha_cum_prod_prev_t = self.alpha_cum_prod_prev.to(device)[t]
+        sqrt_one_minus_alpha_cum_prod_t = self.sqrt_one_minus_alpha_cum_prod.to(device)[
+            t]
+        beta_t = self.betas.to(device)[t]
+
+        # Predict x0
+        x0_pred = (xt - sqrt_one_minus_alpha_cum_prod_t *
+                   noise_pred) / torch.sqrt(alpha_cum_prod_t)
+        x0_pred = torch.clamp(x0_pred, -1., 1.)
+
+        # Calculate mean
+        mean = (1 / torch.sqrt(alpha_cum_prod_prev_t)) * \
+            (xt - (beta_t / sqrt_one_minus_alpha_cum_prod_t) * noise_pred)
+
         if t == 0:
-            return mean, x0
+            return mean, x0_pred
         else:
-            variance = (1 - self.sqrt_alpha_cum_prod.to(xt.device)[t-1]) / (1.0 - self.alpha_cum_prod.to(xt.device)[t])
-            variance = variance * self.betas.to(xt.device)[t]
-            sigma = variance ** 0.5
-            z = torch.randn(xt.shape).to(xt.device)
-            
-            return mean + sigma * z, x0
+            # Calculate variance for t > 0
+            alpha_cum_prod_prev_t_minus_1 = self.alpha_cum_prod_prev.to(device)[
+                t-1]
+            variance = (1 - alpha_cum_prod_prev_t_minus_1) / \
+                (1 - alpha_cum_prod_t) * beta_t
+            sigma = torch.sqrt(variance)
+
+            # Add noise
+            z = torch.randn_like(xt)
+            return mean + sigma * z, x0_pred
