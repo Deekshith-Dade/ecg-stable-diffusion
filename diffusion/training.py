@@ -3,6 +3,7 @@ import numpy as np
 import torch
 
 from torch.utils.data.distributed import DistributedSampler
+import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 
@@ -30,9 +31,10 @@ class Training:
             self.gpu_id = int(os.environ["LOCAL_RANK"])
         else:
             self.gpu_id = 0
+        self.config = config
 
         self.device = torch.device(
-            f"cuda:{self.gpu_id}" if torch.cuda.is_available else "cpu")
+            f"cuda:{self.gpu_id}" if torch.cuda.is_available() else "cpu")
         self.diffusion_config = config['diffusion_params']
         self.dataset_config = config['dataset_config']
         self.diffusion_model_config = config['ldm_config']
@@ -40,7 +42,7 @@ class Training:
         self.train_config = config['train_params']
         self.means = self.dataset_config['means']
         self.stds = self.dataset_config['stds']
-        self.logtowandb = True
+        self.logtowandb = config['logtowandb']
 
         # Noise Scheduler
         if self.train_config['noise_schedule'] == "cosine":
@@ -78,12 +80,34 @@ class Training:
 
         self.model = Unet(channels=self.diffusion_model_config['in_channels'],
                           model_config=self.diffusion_model_config).to(self.device)
+
         self.optimizer = optim.Adam(
             self.model.parameters(), lr=self.train_config['ldm_lr'])
         self.start_epoch = 0
+        self.vqvae_mean = None
+        self.vqvae_std = None
 
-        # load previous model if available
+        # load previous vqvae model if available
+        self.vae = VQVAEECG(
+            model_config=self.autoencoder_model_config).to(self.device)
+        self.vae.eval()
+        for param in self.vae.parameters():
+            param.requires_grad = False
 
+        if os.path.exists(self.train_config['vqvae_autoencoder_ckpt_name']):
+            self.vae.load_state_dict(torch.load(
+                self.train_config['vqvae_autoencoder_ckpt_name'], map_location=self.device, weights_only=False
+            )['model_state_dict'])
+            print("Loaded VQVAE Checkpoint")
+        else:
+            raise Exception('VAE Checkpoint not Found')
+
+        # calculating latent means and stds
+        self.calculate_latent_mean_std_ddp()
+        if self.use_ddp:
+            dist.barrier()
+
+        # Loading LDM if available
         if self.train_config['checkpoint_path'] is not None:
             if os.path.exists(self.train_config['checkpoint_path']):
                 checkpoint = torch.load(
@@ -106,22 +130,121 @@ class Training:
             self.stds = self.stds.to(self.device)
 
         self.model.train()
-        self.vae = VQVAEECG(
-            model_config=self.autoencoder_model_config).to(self.device)
-        self.vae.eval()
-        for param in self.vae.parameters():
-            param.requires_grad = False
-
-        if os.path.exists(self.train_config['vqvae_autoencoder_ckpt_name']):
-            self.vae.load_state_dict(torch.load(
-                self.train_config['vqvae_autoencoder_ckpt_name'], map_location=self.device, weights_only=False
-            )['model_state_dict'])
-            print("Loaded VQVAE Checkpoint")
-        else:
-            raise Exception('VAE Checkpoint not Found')
 
         self.num_epochs = self.train_config['epochs']
         self.criterion = torch.nn.functional.mse_loss
+
+    def calculate_latent_mean_std(self):
+        self.vae.eval()
+
+        latents_sum = None
+        latents_sq_sum = None
+        count = 0
+        with torch.no_grad():
+            for batch in tqdm(self.normal_dataloader, desc="Calculating Latent Mean and Std", disable=(self.gpu_id != 0)):
+
+                x = batch['image'].to(self.device)
+                encoder_output = self.vae.encode(x)
+                latents = encoder_output.quantize_output.z_q
+
+                b, c = latents.shape[0], latents.shape[1]
+                latents_flat = latents.view(b, c, -1)
+
+                if latents_sum is None:
+                    latents_sum = latents_flat.sum(dim=(0, 2))
+                    latents_sq_sum = (latents_flat ** 2).sum(dim=(0, 2))
+                else:
+                    latents_sum += latents_flat.sum(dim=(0, 2))
+                    latents_sq_sum += (latents_flat ** 2).sum(dim=(0, 2))
+                count += b * latents_flat.shape[2]
+
+        mean = latents_sum / count
+        var = (latents_sq_sum / count) - (mean ** 2)
+        std = torch.sqrt(var)
+
+        self.vqvae_mean = mean.view(1, -1, 1, 1).to(self.device)
+        self.vqvae_std = std.view(1, -1, 1, 1).to(self.device)
+
+        print("VQ-VAE Latent Mean:", self.vqvae_mean)
+        print("VQ-VAE Latent Std:", self.vqvae_std)
+
+    def calculate_latent_mean_std_ddp(self):
+        self.vae.eval()
+
+        use_ddp = getattr(self, "use_ddp", False)
+        ddp_active = use_ddp and dist.is_available() and dist.is_initialized()
+        rank = dist.get_rank() if ddp_active else 0
+
+        local_sum = None
+        local_sqsum = None
+        local_count = 0
+        spatial_ndims = None
+
+        with torch.no_grad():
+            iterator = self.dataloader
+            if rank == 0:
+                pbar = tqdm(iterator, desc="Calculating Latent Mean and Std")
+            else:
+                pbar = iterator
+
+            for batch in pbar:
+                x = batch['image'].to(self.device, non_blocking=True)
+
+                enc_out = self.vae.encode(x)
+
+                latents = enc_out.quantize_output.z_q
+
+                B, C = latents.shape[:2]
+                spatial_ndims = latents.dim() - 2
+                latents_flat = latents.view(B, C, -1)
+
+                s = latents_flat.sum(dim=(0, 2))
+                q = (latents_flat ** 2).sum(dim=(0, 2))
+                n = B * latents_flat.shape[2]
+
+                if local_sum is None:
+                    local_sum = s
+                    local_sqsum = q
+                else:
+                    local_sum += s
+                    local_sqsum += q
+                local_count += n
+
+        if local_sum is None:
+            raise RuntimeError("No data was processed. Check dataloader")
+
+        sum_t = local_sum.to(self.device, dtype=torch.float64)
+        sqsum_t = local_sqsum.to(self.device, dtype=torch.float64)
+        cnt_t = torch.tensor(
+            [local_count], device=self.device, dtype=torch.long)
+
+        if ddp_active:
+            dist.all_reduce(sum_t, op=dist.ReduceOp.SUM)
+            dist.all_reduce(sqsum_t, op=dist.ReduceOp.SUM)
+            dist.all_reduce(cnt_t, op=dist.ReduceOp.SUM)
+
+        total_count = cnt_t.item()
+        mean = sum_t / total_count
+
+        var = (sqsum_t / total_count) - mean ** 2
+        std = torch.sqrt(torch.clamp(var, min=1e-12))
+
+        final_shape = (1, -1) + (1, ) * \
+            (spatial_ndims if spatial_ndims is not None else 2)
+        self.vqvae_mean = mean.view(*final_shape).to(self.device, x.dtype)
+        self.vqvae_std = std.view(*final_shape).to(self.device, x.dtype)
+
+        if rank == 0:
+            print(
+                f"VQ-VAE Latent Mean (first 5 channels): {self.vqvae_mean.flatten()[:5]}")
+            print(
+                f"VQ-VAE Latent Std (first 5 channels): {self.vqvae_std.flatten()[:5]}")
+
+    def normalize_latents(self, latents):
+        return (latents - self.vqvae_mean) / self.vqvae_std
+
+    def denormalize_latents(self, latents):
+        return latents * self.vqvae_std + self.vqvae_mean
 
     def diff_random_sample(self):
         self.model.eval()
@@ -159,7 +282,7 @@ class Training:
 
         # Sampling
         with torch.no_grad():
-            for i in tqdm(reversed(range(self.diffusion_config['num_timesteps']))):
+            for i in tqdm(reversed(range(self.diffusion_config['num_timesteps'])), disable=(self.gpu_id != 0)):
                 t = (torch.ones((xt.shape[0],)) * i).long().to(self.device)
                 noise_pred_cond = self.model(xt, t, cond_input)
 
@@ -175,7 +298,8 @@ class Training:
                 )
 
                 if i == 0:
-                    decoder_output = self.vae.decode(x0_pred / 5.0)
+                    decoder_output = self.vae.decode(
+                        self.denormalize_latents(x0_pred))
                     ims = decoder_output.x_hat
                 else:
                     ims = x0_pred
@@ -192,7 +316,7 @@ class Training:
             losses = []
             perplexities = []
 
-            for data in tqdm(self.dataloader):
+            for data in tqdm(self.dataloader, disable=(self.gpu_id != 0)):
                 cond_input = None
                 if self.condition_config is not None:
                     im, cond_input = data['image'], data['cond_inputs']
@@ -208,7 +332,7 @@ class Training:
 
                     encoder_output = self.vae.encode(im)
                     im = encoder_output.quantize_output.z_q
-                    im = im * 5.0
+                    im = self.normalize_latents(im)
                     perplexity = encoder_output.quantize_output.perplexity
                     perplexities.append(perplexity.item())
 
@@ -242,7 +366,6 @@ class Training:
 
                 t = torch.randint(
                     0, self.diffusion_config['num_timesteps'], (im.shape[0],)).to(self.device)
-
                 noisy_im = self.scheduler.add_noise(im, noise, t)
                 noise_pred = self.model(noisy_im, t, cond_input=cond_input)
                 loss = self.criterion(noise_pred, noise)
@@ -278,7 +401,10 @@ class Training:
                     'model_state_dict': self.model.module.state_dict() if self.use_ddp else self.model.state_dict(),
                     'optimizer_state_dict': self.optimizer.state_dict(),
                     'epoch': epoch_idx,
-                    'loss': np.mean(losses)
+                    'loss': np.mean(losses),
+                    'config': self.config,
+                    'vqvae_mean': self.vqvae_mean,
+                    'vqvae_std': self.vqvae_std,
                 }
 
                 torch.save(

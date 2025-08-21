@@ -22,6 +22,7 @@ class VQVAETraining:
                  model: VQVAEBase,
                  optimizer: torch.optim.Optimizer,
                  dataloader: torch.utils.data.DataLoader,
+                 test_dataset: torch.utils.data.Dataset,
                  results_folder: str,
                  stats: Optional[dict] = None,
                  discriminator_setup: Optional[Dict[str, Any]] = None,
@@ -30,6 +31,7 @@ class VQVAETraining:
         self.model = model
         self.optimizer = optimizer
         self.dataloader = dataloader
+        self.test_dataset = test_dataset
         self.results_folder = results_folder
         self.discriminator: Optional[nn.Module] = discriminator_setup[
             'discriminator'] if discriminator_setup is not None else None
@@ -113,13 +115,14 @@ class VQVAETraining:
 
     def train(self):
 
-        for epoch in range(self.curr_epoch+1, self.args.n_epochs):
+        for epoch in range(self.curr_epoch, self.args.n_epochs):
             print(f"Training step {epoch+1}/{self.args.n_epochs}", end='\r')
+            self.model.train()
 
             if isinstance(self.dataloader.sampler, DistributedSampler):
                 self.dataloader.sampler.set_epoch(epoch)
 
-            for batch_idx, batch in enumerate(tqdm(self.dataloader, desc=f"Epoch {epoch+1}")):
+            for batch_idx, batch in enumerate(tqdm(self.dataloader, desc=f"Epoch {epoch}")):
                 x: torch.Tensor = batch['image'].to(self.target_device)
                 if self.means is not None and self.stds is not None:
                     x = x.unsqueeze(1).to(self.target_device)
@@ -234,14 +237,34 @@ class VQVAETraining:
                         x = x * self.stds + self.means if self.stds is not None else x
                         x_hat = x_hat * self.stds + self.means if self.stds is not None else x_hat
 
-                        fig1 = visualizeLeads_comp(x[0].squeeze().detach().cpu(), "comparison 1", x_hat[0].squeeze(
+                        fig1 = visualizeLeads_comp(x[0].squeeze().detach().cpu(), "Train comparison 1", x_hat[0].squeeze(
                         ).detach().cpu(), f"{self.results_folder}/plots/{self.results['n_updates']}_fig1.png")
                         plt.close()
-                        fig2 = visualizeLeads_comp(x[1].squeeze().detach().cpu(), "comparison 2", x_hat[1].squeeze(
+                        fig2 = visualizeLeads_comp(x[1].squeeze().detach().cpu(), "Train comparison 2", x_hat[1].squeeze(
                         ).detach().cpu(), f"{self.results_folder}/plots/{self.results['n_updates']}_fig2.png")
                         plt.close()
                         training_log['fig1'] = fig1
                         training_log['fig2'] = fig2
+
+                        # Plotting Test Images
+                        # idxs = torch.randint(0, len(self.test_dataset), (2,))
+                        # inputs = torch.stack(
+                        #     [self.test_dataset[ind]['image'].unsqueeze(0) for ind in idxs], dim=0).to(self.device)
+                        # norm_inputs = (inputs - self.means) / self.stds
+                        # with torch.no_grad():
+                        #     outputs = self.model(norm_inputs)
+                        # x_hat = outputs.x_hat
+                        # x_hat = x_hat * self.stds + self.means
+
+                        # test_fig1 = visualizeLeads_comp(inputs[0].squeeze().detach().cpu(), "Test comparison 1", x_hat[0].squeeze(
+                        # ).detach().cpu(), f"{self.results_folder}/plots/{self.results['n_updates']}_test_fig1.png")
+                        # plt.close()
+                        # test_fig2 = visualizeLeads_comp(inputs[1].squeeze().detach().cpu(), "Test comparison 2", x_hat[1].squeeze(
+                        # ).detach().cpu(), f"{self.results_folder}/plots/{self.results['n_updates']}_test_fig2.png")
+                        # plt.close()
+                        # training_log['test_fig1'] = test_fig1
+                        # training_log['test_fig2'] = test_fig2
+                        # print("Plots Loaded to Training Dict")
 
                     wandb.log(training_log)
 

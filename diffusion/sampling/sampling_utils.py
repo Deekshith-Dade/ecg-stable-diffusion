@@ -54,7 +54,7 @@ def diff_random_sample(model, vae, scheduler, train_config, diffusion_model_conf
 
     # Sampling
     with torch.no_grad():
-        for i in tqdm(reversed(range(diffusion_config['num_timesteps']))):
+        for i in tqdm(reversed(range(diffusion_config['num_timesteps'])), disable=(getattr(device, 'index', 0) != 0 if torch.cuda.is_available() else False)):
             t = (torch.ones((xt.shape[0],)) * i).long().to(device)
             noise_pred_cond = model(xt, t, cond_input)
 

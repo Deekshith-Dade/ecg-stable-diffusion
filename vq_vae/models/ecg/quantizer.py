@@ -17,9 +17,11 @@ class VectorQuantizer(nn.Module):
                                             self.num_embeddings, 1.0 / self.num_embeddings)
         if torch.cuda.is_available():
             if "LOCAL_RANK" in os.environ:
-                self.device = int(os.environ["LOCAL_RANK"])
+                self.device = torch.device(
+                    f"cuda:{int(os.environ['LOCAL_RANK'])}")
             else:
-                self.device = torch.cuda.current_device()
+                self.device = torch.device(
+                    f"cuda:{torch.cuda.current_device()}")
         else:
             self.device = torch.device("cpu")
 

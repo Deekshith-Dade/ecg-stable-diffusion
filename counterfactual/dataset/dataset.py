@@ -88,7 +88,6 @@ class ECG_KCL_Datasetloader(Dataset):
 
 
 def getKCLTrainTestDataset(dataset_config):
-
     randSeed = dataset_config['randSeed']
     timeCutoff = dataset_config['timeCutOff']
     lowerCutoff = dataset_config['lowerCutOff']
@@ -291,9 +290,9 @@ def get_datasets(scale_training_size=1.0, dataset_type="1M_dataset"):
         baseDir=dataDir + 'pythonData/',
         ecgs=val_df['ECGFile'].tolist(),
         patientIds=val_df['PatId'].tolist(),
-        normalize=False,
-        randomCrop=True,
-        allowMismatchTime=False,
+        normalize=True,
+        normMethod='0to1',
+        randomCrop=False,  # Usually don't crop validation data
         cropSize=2500
     )
 

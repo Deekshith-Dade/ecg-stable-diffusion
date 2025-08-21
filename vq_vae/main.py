@@ -36,19 +36,19 @@ parser = argparse.ArgumentParser()
 
 timestamp = ""
 
-parser.add_argument("--batch_size", type=int, default=42)
+parser.add_argument("--batch_size", type=int, default=42)  # * 7
 parser.add_argument("--n_epochs", type=int, default=450)
 parser.add_argument("--learning_rate", type=float, default=1e-5)
 parser.add_argument("--log_interval", type=int, default=1)
-parser.add_argument("--scale_training_size", type=float, default=0.5)
+parser.add_argument("--scale_training_size", type=float, default=0.001)
 parser.add_argument("--save_every", type=int, default=1,
                     help="Save model every n epochs")
 parser.add_argument("--logtowandb", action='store_true',
                     default=False, help="Log to wandb")
 parser.add_argument("--train_ecgs", action='store_true',
-                    default=False, help="Train on ECGs")
+                    default=True, help="Train on ECGs")
 parser.add_argument("--learning_rate_disc", type=float, default=1e-5)
-parser.add_argument("--beta", type=float, default=0.1)
+parser.add_argument("--beta", type=float, default=0.25)
 parser.add_argument("--disc_epoch_start", type=int, default=10)
 parser.add_argument("--disc_loss_weight", type=float, default=0.1)
 parser.add_argument("--vqvae_checkpoint", type=str, default=None,
@@ -75,7 +75,8 @@ def main():
     current_time = datetime.datetime.now()
     formatted_time = current_time.strftime("%Y-%m-%d_%H-%M-%S")
 
-    args.vqvae_checkpoint = "/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/vq_vae/results/ecgs/vqvae_2025-07-26_14-23-52/checkpoint.pt"
+    # args.vqvae_checkpoint = "/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/vq_vae/results/ecgs/vqvae_2025-08-20_18-38-00/checkpoint.pt"
+    args.vqvae_checkpoint = None
     project_name = "vqvae_" + formatted_time
     if args.vqvae_checkpoint:
         project_name = args.vqvae_checkpoint.split("/")[-2]
@@ -163,7 +164,7 @@ def main():
             config=config,
             name=project_name,
             resume="allow",
-            id="tik4yrsl"
+            # id="l7ohmri9"
         )
         run_id = wandbrun.id
         print(f"Run ID: {run_id}")
@@ -173,6 +174,7 @@ def main():
         model=model,
         optimizer=optimizer,
         dataloader=train_dataloader,
+        test_dataset=val_dataset,
         results_folder=results_folder,
         stats=stats,
         discriminator_setup=discriminator_setup,

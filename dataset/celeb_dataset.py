@@ -74,7 +74,7 @@ class CelebDataset(Dataset):
             self.cls_to_idx_map = {
                 label_list[idx]: idx for idx in range(len(label_list))}
 
-        for fname in tqdm(fnames):
+        for fname in tqdm(fnames, disable=(int(os.environ.get('LOCAL_RANK', 0)) != 0)):
             ims.append(fname)
 
             if 'text' in self.condition_types:
