@@ -17,7 +17,7 @@ class CelebDataset(Dataset):
     are under one directory.
     """
 
-    def __init__(self, split, im_path='/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/data/CelebAMask-HQ', im_size=256, im_channels=3, im_ext='jpg',
+    def __init__(self, split, im_path='/uufs/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/data/CelebAMask-HQ', im_size=256, im_channels=3, im_ext='jpg',
                  use_latents=False, latent_path=None, condition_config=None):
         self.split = split
         self.im_size = im_size

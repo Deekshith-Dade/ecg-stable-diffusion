@@ -184,7 +184,7 @@ if __name__ == "__main__":
     
     import yaml
     
-    path = "/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/configs/diff.yaml"
+    path = "/uufs/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/configs/diff.yaml"
     with open(path, 'r') as f:
         try:
             config = yaml.safe_load(f)

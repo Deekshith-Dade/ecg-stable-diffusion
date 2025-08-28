@@ -1,7 +1,7 @@
 dataset_config:
-  data_path: '/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/data/ecgs_patients.parquet'
-  dataDir: '/uu/sci.utah.edu/projects/ClinicalECGs/AllClinicalECGs/'
-  timeCutOff: 4800
+  data_path: '/uufs/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/data/ecgs_patients.parquet'
+  dataDir: '/uufs/sci.utah.edu/projects/ClinicalECGs/AllClinicalECGs/'
+  timeCutOff: 960000
   lowerCutOff: 0
   randSeed: 7777
   scale_training_size: 1.0
@@ -13,7 +13,7 @@ dataset_config:
 autoencoder_config:
   dim_mults: [1, 2, 4]
   in_channels: 1
-  init_dim: 32
+  init_dim: 128
   embedding_dim: 16
   codebook_size: 4096
   beta: 0.25
@@ -29,13 +29,13 @@ diffusion_params:
 
 ldm_config:
   in_channels: 16
-  dim: 32
-  init_dim: 32
+  dim: 64
+  init_dim: 64
   dim_mults: [2, 4, 8, 8]
   attn_dim_head: 64
   attn_heads: 8
   condition_config: 
-    condition_types: ['class']
+    condition_types: ['text']
     text_condition_config:
       text_embed_model: 'clip'
       text_embed_dim: 512
@@ -46,7 +46,7 @@ ldm_config:
 
 train_params:
   task_name: ''
-  vqvae_autoencoder_ckpt_name: "/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/vq_vae/results/ecgs/vqvae_2025-07-26_14-23-52/checkpoint_45.pt"
+  vqvae_autoencoder_ckpt_name: "/uufs/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/vq_vae/results/ecgs/vqvae_2025-08-21_20-43-04/checkpoint_10.pt"
   epochs: 200
   results_folder: "results/diff_checkpoint.pt"
   ldm_lr: 0.000003

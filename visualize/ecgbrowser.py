@@ -111,6 +111,6 @@ class ECGBrowser:
 
 
 if __name__ == "__main__":
-    file_path = "/uu/sci.utah.edu/projects/ClinicalECGs/AllClinicalECGs/pythonData"
+    file_path = "/uufs/sci.utah.edu/projects/ClinicalECGs/AllClinicalECGs/pythonData"
     browser = ECGBrowser(file_path, load_big=True)
     browser.show()

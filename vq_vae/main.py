@@ -36,11 +36,11 @@ parser = argparse.ArgumentParser()
 
 timestamp = ""
 
-parser.add_argument("--batch_size", type=int, default=42)  # * 7
+parser.add_argument("--batch_size", type=int, default=42 * 4)  # * 7
 parser.add_argument("--n_epochs", type=int, default=450)
 parser.add_argument("--learning_rate", type=float, default=1e-5)
 parser.add_argument("--log_interval", type=int, default=1)
-parser.add_argument("--scale_training_size", type=float, default=0.001)
+parser.add_argument("--scale_training_size", type=float, default=1.0)
 parser.add_argument("--save_every", type=int, default=1,
                     help="Save model every n epochs")
 parser.add_argument("--logtowandb", action='store_true',
@@ -75,8 +75,8 @@ def main():
     current_time = datetime.datetime.now()
     formatted_time = current_time.strftime("%Y-%m-%d_%H-%M-%S")
 
-    # args.vqvae_checkpoint = "/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/vq_vae/results/ecgs/vqvae_2025-08-20_18-38-00/checkpoint.pt"
-    args.vqvae_checkpoint = None
+    args.vqvae_checkpoint = "/uufs/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/vq_vae/results/ecgs/vqvae_2025-08-21_20-43-04/checkpoint.pt"
+    # args.vqvae_checkpoint = None
     project_name = "vqvae_" + formatted_time
     if args.vqvae_checkpoint:
         project_name = args.vqvae_checkpoint.split("/")[-2]
@@ -85,16 +85,16 @@ def main():
     if train_ecgs:
         print(f"Loading mean and stds for the dataset")
         stats = torch.load(
-            '/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/data/ecg_train_stats.pt', weights_only=True, map_location=device)
+            '/uufs/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/data/ecg_train_stats.pt', weights_only=True, map_location=device)
         mean = stats['mean']
         std = stats['std']
         print(f"Means: {mean}, Stds: {std}")
-        config_path = "/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/configs/ecg_diff.yaml"
+        config_path = "/uufs/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/configs/ecg_diff.yaml"
         train_dataset, val_dataset = dataset.get_datasets(
             args.scale_training_size)
 
     else:
-        config_path = "/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/configs/im_diff.yaml"
+        config_path = "/uufs/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/configs/im_diff.yaml"
         stats = None
         mean = None
         std = None
@@ -164,7 +164,7 @@ def main():
             config=config,
             name=project_name,
             resume="allow",
-            # id="l7ohmri9"
+            id="pn5i6l6m"
         )
         run_id = wandbrun.id
         print(f"Run ID: {run_id}")
@@ -177,6 +177,7 @@ def main():
         test_dataset=val_dataset,
         results_folder=results_folder,
         stats=stats,
+        model_config=model_config,
         discriminator_setup=discriminator_setup,
         checkpoint_path=f"{results_folder}/checkpoint.pt" if os.path.exists(
             f"{results_folder}/checkpoint.pt") else None

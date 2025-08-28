@@ -25,6 +25,7 @@ class VQVAETraining:
                  test_dataset: torch.utils.data.Dataset,
                  results_folder: str,
                  stats: Optional[dict] = None,
+                 model_config=None,
                  discriminator_setup: Optional[Dict[str, Any]] = None,
                  checkpoint_path: Optional[str] = None):
         self.args = args
@@ -39,6 +40,7 @@ class VQVAETraining:
             'optimizer'] if discriminator_setup is not None else None
         self.means = stats['mean'] if stats is not None else None
         self.stds = stats['std'] if stats is not None else None
+        self.model_config = model_config
 
         self.use_ddp = "LOCAL_RANK" in os.environ
         self.device = torch.device(
@@ -283,6 +285,7 @@ class VQVAETraining:
             'optimizer_state_dict': self.optimizer.state_dict(),
             'discriminator_state_dict': model_state_dict_disc,
             'optimizer_disc_state_dict': self.optimizer_disc.state_dict() if self.optimizer_disc else None,
+            'model_config': self.model_config,
         }
         torch.save(
             checkpoint, f"{self.results_folder}/checkpoint.pt")

@@ -44,7 +44,7 @@ ldm_config:
 
 train_params:
   task_name: ''
-  vqvae_autoencoder_ckpt_name: "/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/vq_vae/results/imgs/vqvae_2025-07-06_13-23-21/checkpoint.pt"
+  vqvae_autoencoder_ckpt_name: "/uufs/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/vq_vae/results/imgs/vqvae_2025-07-06_13-23-21/checkpoint.pt"
   epochs: 200
   results_folder: "results/diff_checkpoint.pt"
   ldm_lr: 0.000003

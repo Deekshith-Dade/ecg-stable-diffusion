@@ -244,10 +244,10 @@ def get_datasets(scale_training_size=1.0, dataset_type="1M_dataset"):
     elif dataset_type == "KCL":
         Dataset = ECG_KCL_Datasetloader
 
-    dataDir = '/uu/sci.utah.edu/projects/ClinicalECGs/AllClinicalECGs/'
+    dataDir = '/uufs/sci.utah.edu/projects/ClinicalECGs/AllClinicalECGs/'
     print('finding patients')
     df = pd.read_csv(
-        '/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/data/ecgs_patients_mod.csv')
+        '/uufs/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/data/ecgs_patients_mod.csv')
     # df.to_csv('ecg_files_df.csv', index=False)
     print(f"Number of ECGs: {len(df)}")
 
