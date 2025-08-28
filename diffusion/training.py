@@ -263,7 +263,8 @@ class Training:
             empty_prompt = [''] * len(text_prompt)
             text_prompt_embed = get_text_representation(
                 text_prompt, self.text_tokenizer, self.text_model, self.device)
-            empty_text_embed = self.empty_text_embed
+            empty_text_embed = get_text_representation(
+                empty_prompt, self.text_tokenizer, self.text_model, self.device)
             assert empty_text_embed.shape == text_prompt_embed.shape
             uncond_input['text'] = empty_text_embed
             cond_input['text'] = text_prompt_embed

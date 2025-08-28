@@ -29,8 +29,8 @@ sys.path.append("..")
 
 
 def main():
-    logtowandb = False
-    config_path = "/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/configs/ecg_diff.yaml"
+    logtowandb = True
+    config_path = "/uufs/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/configs/ecg_diff.yaml"
     with open(config_path, 'r') as file:
         try:
             config = yaml.safe_load(file)
@@ -46,14 +46,14 @@ def main():
     config['device'] = gpu_id
     config['logtowandb'] = logtowandb
 
-    stats = torch.load('/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/data/ecg_train_stats.pt',
+    stats = torch.load('/uufs/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/data/ecg_train_stats.pt',
                        weights_only=False, map_location="cpu")
     means = stats['mean'].to(gpu_id)
     stds = stats['std'].to(gpu_id)
 
     config['dataset_config']['means'] = means
     config['dataset_config']['stds'] = stds
-    # config['train_params']['checkpoint_path'] = "/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/diffusion/results/01_ecg/2025-08-01_18-32-03/checkpoint.pt"
+    # config['train_params']['checkpoint_path'] = "/uufs/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/diffusion/results/01_ecg/2025-08-01_18-32-03/checkpoint.pt"
     config['train_params']['checkpoint_path'] = None
 
     current_time = datetime.datetime.now()

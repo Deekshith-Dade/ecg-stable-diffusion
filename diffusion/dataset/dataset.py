@@ -1,9 +1,11 @@
 import os
+from dataset import Loader
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
 import torch.nn.functional as F
+import torchvision.transforms as transforms
 import random
 
 
@@ -13,7 +15,7 @@ class DataLoaderError(Exception):
 
 class ECG_KCL_Datasetloader(Dataset):
     def __init__(self, baseDir='', ecgs=[], kclVals=[], low_threshold=4.0, high_threshold=5.0, rhythmType='Rhythm',
-                 allowMismatchTime=True, mismatchFix='Pad', randomCrop=False,
+                 allowMismatchTime=True, mismatchFix='Pad', randomCrop=False, augmentation=False,
                  cropSize=2500, expectedTime=5000):
         self.baseDir = baseDir
         self.low_threshold = low_threshold
@@ -29,14 +31,21 @@ class ECG_KCL_Datasetloader(Dataset):
         self.use_latents = False
         if self.randomCrop:
             self.expectedTime = self.cropSize
+        self.augs = Loader.TwoCropsTransform(transforms.Compose([
+            Loader.SpatialTransform(),
+            Loader.ZeroMask()
+        ]))
+        
 
     def __getitem__(self, item):
         ecgName = self.ecgs[item].replace('.xml', f'_{self.rhythmType}.npy')
         ecgPath = os.path.join(self.baseDir, ecgName)
-        ecgData = np.load(ecgPath)
+        ecgData = torch.tensor(np.load(ecgPath)).float()
+        
+        ecgData = self.augs(ecgData)[0]
 
         kclVal = torch.tensor(self.kclVals[item])
-        ecgs = torch.tensor(ecgData).unsqueeze(0).float()
+        ecgs = ecgData.unsqueeze(0)
         # temp_ecgs = ecgs.clone()
         # ecgs[0, 0:2] = temp_ecgs[0, 2:4]
         # ecgs[0, 2:4] = temp_ecgs[0, 0:2]
@@ -244,10 +253,10 @@ def get_datasets(scale_training_size=1.0, dataset_type="1M_dataset"):
     elif dataset_type == "KCL":
         Dataset = ECG_KCL_Datasetloader
 
-    dataDir = '/uu/sci.utah.edu/projects/ClinicalECGs/AllClinicalECGs/'
+    dataDir = '/uufs/sci.utah.edu/projects/ClinicalECGs/AllClinicalECGs/'
     print('finding patients')
     df = pd.read_csv(
-        '/uu/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/data/ecgs_patients_mod.csv')
+        '/uufs/sci.utah.edu/projects/ClinicalECGs/DeekshithMLECG/ecg_latent_diff/data/ecgs_patients_mod.csv')
     # df.to_csv('ecg_files_df.csv', index=False)
     print(f"Number of ECGs: {len(df)}")
 
